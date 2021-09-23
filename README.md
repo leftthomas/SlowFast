@@ -193,7 +193,3 @@ and `weight decay` is `5e-4`. all the hyper-parameters are the default values.
   </tr>
 </tbody>
 </table>
-
-## Results
-
-![vis](result/vis.png)
