@@ -106,3 +106,4 @@ def compute_metric(vectors, domains, labels):
     acc['precise'] = (acc['P@100'] + acc['P@200'] + acc['mAP@200'] + acc['mAP@all']) / 4
     return acc
 
+
