@@ -5,7 +5,7 @@ import shutil
 import torch
 from PIL import Image, ImageDraw
 
-from utils import DomainDataset
+from utils import VideoDataset
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Test Model')
@@ -23,11 +23,11 @@ if __name__ == '__main__':
     save_root, data_name = opt.save_root, data_base.split('/')[-1].split('_')[0]
 
     vectors = torch.load(data_base)
-    val_data = DomainDataset(data_root, data_name, split='val')
+    val_data = VideoDataset(data_root, data_name, split='val')
 
-    if query_name not in val_data.images:
+    if query_name not in val_data.videos:
         raise FileNotFoundError('{} not found'.format(query_name))
-    query_index = val_data.images.index(query_name)
+    query_index = val_data.videos.index(query_name)
     query_image = Image.open(query_name).resize((224, 224), resample=Image.BILINEAR)
     query_label = val_data.labels[query_index]
     query_feature = vectors[query_index]
@@ -35,7 +35,7 @@ if __name__ == '__main__':
     gallery_images, gallery_labels = [], []
     for i, domain in enumerate(val_data.domains):
         if domain == 0:
-            gallery_images.append(val_data.images[i])
+            gallery_images.append(val_data.videos[i])
             gallery_labels.append(val_data.labels[i])
     gallery_features = vectors[torch.tensor(val_data.domains) == 0]
 

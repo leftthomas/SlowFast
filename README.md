@@ -14,22 +14,10 @@ A PyTorch implementation of MSTP based on CVPR 2022 paper
 conda install pytorch=1.9.0 torchvision cudatoolkit -c pytorch
 ```
 
-- [Pytorch Metric Learning](https://kevinmusgrave.github.io/pytorch-metric-learning/)
+- [PyTorchVideo](https://pytorchvideo.org)
 
 ```
-pip install pytorch-metric-learning
-```
-
-- [Faiss](https://faiss.ai)
-
-```
-conda install -c pytorch faiss-cpu
-```
-
-- [Timm](https://rwightman.github.io/pytorch-image-models/)
-
-```
-pip install timm
+pip install pytorchvideo
 ```
 
 ## Dataset

@@ -3,17 +3,12 @@ import os
 import random
 
 import numpy as np
-import pandas as pd
 import torch
-from pytorch_metric_learning.losses import NormalizedSoftmaxLoss
-from torch import nn
 from torch.backends import cudnn
-from torch.optim import Adam
 from torch.utils.data.dataloader import DataLoader
 from tqdm import tqdm
 
-from model import Extractor, Discriminator, Generator
-from utils import DomainDataset, compute_metric
+from utils import VideoDataset
 
 # for reproducibility
 random.seed(1)
@@ -125,8 +120,8 @@ def val(backbone, encoder, data_loader):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train Model')
     # common args
-    parser.add_argument('--data_root', default='/data', type=str, help='Datasets root path')
-    parser.add_argument('--data_name', default='sketchy', type=str, choices=['sketchy', 'tuberlin'],
+    parser.add_argument('--data_root', default='/home/rh/Downloads', type=str, help='Datasets root path')
+    parser.add_argument('--data_name', default='kinetics400', type=str, choices=['kinetics400', 'something_v2'],
                         help='Dataset name')
     parser.add_argument('--backbone_type', default='resnet50', type=str, choices=['resnet50', 'vgg16'],
                         help='Backbone type')
@@ -142,51 +137,47 @@ if __name__ == '__main__':
     batch_size, epochs, warmup, save_root = args.batch_size, args.epochs, args.warmup, args.save_root
 
     # data prepare
-    train_data = DomainDataset(data_root, data_name, split='train')
-    val_data = DomainDataset(data_root, data_name, split='val')
-    train_loader = DataLoader(train_data, batch_size=batch_size // 2, shuffle=True, num_workers=8)
+    train_data = VideoDataset(data_root, data_name, split='train')
+    val_data = VideoDataset(data_root, data_name, split='val')
+    test_data = VideoDataset(data_root, data_name, split='test')
+    train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=8)
     val_loader = DataLoader(val_data, batch_size=batch_size, shuffle=False, num_workers=8)
+    test_loader = DataLoader(val_data, batch_size=batch_size, shuffle=False, num_workers=8)
 
-    # model define
-    extractor = Extractor(backbone_type, emb_dim).cuda()
-    generator = Generator(in_channels=8).cuda()
-    discriminator = Discriminator(in_channels=8).cuda()
-
-    # loss setup
-    class_criterion = NormalizedSoftmaxLoss(len(train_data.classes), emb_dim).cuda()
-    adversarial_criterion = nn.MSELoss()
-    # optimizer config
-    optimizer_extractor = Adam([{'params': extractor.parameters()}, {'params': class_criterion.parameters(),
-                                                                     'lr': 1e-1}], lr=1e-5)
-    optimizer_generator = Adam(generator.parameters(), lr=2e-4, betas=(0.5, 0.999))
-    optimizer_discriminator = Adam(discriminator.parameters(), lr=2e-4, betas=(0.5, 0.999))
+    # # model define
+    # extractor = Extractor(backbone_type, emb_dim).cuda()
+    # generator = Generator(in_channels=8).cuda()
+    # discriminator = Discriminator(in_channels=8).cuda()
+    #
+    # # loss setup
+    # class_criterion = NormalizedSoftmaxLoss(len(train_data.classes), emb_dim).cuda()
+    # adversarial_criterion = nn.MSELoss()
+    # # optimizer config
+    # optimizer_extractor = Adam([{'params': extractor.parameters()}, {'params': class_criterion.parameters(),
+    #                                                                  'lr': 1e-1}], lr=1e-5)
+    # optimizer_generator = Adam(generator.parameters(), lr=2e-4, betas=(0.5, 0.999))
+    # optimizer_discriminator = Adam(discriminator.parameters(), lr=2e-4, betas=(0.5, 0.999))
 
     # training loop
-    results = {'extractor_loss': [], 'generator_loss': [], 'discriminator_loss': [], 'precise': [],
-               'P@100': [], 'P@200': [], 'mAP@200': [], 'mAP@all': []}
+    results = {'loss': [], 'acc': [], 'top-1': [], 'top-5': []}
     save_name_pre = '{}_{}_{}'.format(data_name, backbone_type, emb_dim)
     if not os.path.exists(save_root):
         os.makedirs(save_root)
-    best_precise = 0.0
+    best_acc = 0.0
     for epoch in range(1, epochs + 1):
-
-        # warmup, not update the parameters of extractor, except the final fc layer
-        for param in list(extractor.backbone.parameters())[:-2]:
-            param.requires_grad = False if epoch <= warmup else True
-
-        extractor_loss, generator_loss, discriminator_loss = train(extractor, train_loader, optimizer_extractor)
-        results['extractor_loss'].append(extractor_loss)
-        results['generator_loss'].append(generator_loss)
-        results['discriminator_loss'].append(discriminator_loss)
-        precise, features = val(extractor, generator, val_loader)
-        results['precise'].append(precise * 100)
-        # save statistics
-        data_frame = pd.DataFrame(data=results, index=range(1, epoch + 1))
-        data_frame.to_csv('{}/{}_results.csv'.format(save_root, save_name_pre), index_label='epoch')
-
-        if precise > best_precise:
-            best_precise = precise
-            torch.save(extractor.state_dict(), '{}/{}_extractor.pth'.format(save_root, save_name_pre))
-            torch.save(generator.state_dict(), '{}/{}_generator.pth'.format(save_root, save_name_pre))
-            torch.save(discriminator.state_dict(), '{}/{}_discriminator.pth'.format(save_root, save_name_pre))
-            torch.save(features, '{}/{}_vectors.pth'.format(save_root, save_name_pre))
+        for video, label in tqdm(train_loader, dynamic_ncols=True):
+            print(video.size())
+            print(label.size())
+        # train_loss = train(extractor, train_loader, optimizer_extractor)
+        # results['extractor_loss'].append(train_loss)
+        # results['generator_loss'].append(generator_loss)
+        # results['discriminator_loss'].append(discriminator_loss)
+        # precise, features = val(extractor, generator, val_loader)
+        # results['precise'].append(precise * 100)
+        # # save statistics
+        # data_frame = pd.DataFrame(data=results, index=range(1, epoch + 1))
+        # data_frame.to_csv('{}/{}_results.csv'.format(save_root, save_name_pre), index_label='epoch')
+        #
+        # if precise > best_acc:
+        #     best_acc = precise
+        #     torch.save(extractor.state_dict(), '{}/{}_extractor.pth'.format(save_root, save_name_pre))
