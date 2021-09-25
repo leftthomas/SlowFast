@@ -7,12 +7,13 @@ import pandas as pd
 import torch
 from pytorchvideo.data import RandomClipSampler, UniformClipSampler, labeled_video_dataset
 from pytorchvideo.models import create_slowfast
-from pytorchvideo.transforms import create_video_transform
 from torch.backends import cudnn
 from torch.nn import CrossEntropyLoss
 from torch.optim import Adam
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+
+from utils import train_transform, test_transform, clip_duration, num_classes
 
 # for reproducibility
 random.seed(1)
@@ -27,16 +28,16 @@ def train(model, data_loader, train_optimizer):
     model.train()
     total_loss, total_acc, total_num, train_bar = 0.0, 0, 0, tqdm(data_loader, dynamic_ncols=True)
     for batch in train_bar:
-        video, label = batch['video'].cuda(), batch['label'].cuda()
+        video, label = [i.cuda() for i in batch['video']], batch['label'].cuda()
         train_optimizer.zero_grad()
         pred = model(video)
         loss = loss_criterion(pred, label)
-        total_loss += loss.item() * video.size(0)
+        total_loss += loss.item() * video[0].size(0)
         total_acc += (torch.eq(pred.argmax(dim=-1), label)).sum().item()
         loss.backward()
         train_optimizer.step()
 
-        total_num += video.size(0)
+        total_num += video[0].size(0)
         train_bar.set_description('Train Epoch: [{}/{}] Loss: {:.4f} Acc: {:.2f}%'
                                   .format(epoch, epochs, total_loss / total_num, total_acc * 100 / total_num))
 
@@ -49,10 +50,11 @@ def val(model, data_loader):
     with torch.no_grad():
         total_top_1, total_top_5, total_num = 0, 0, 0
         for batch in tqdm(data_loader, dynamic_ncols=True):
-            video, label = batch['video'].cuda(), batch['label'].cuda()
+            video, label = [i.cuda() for i in batch['video']], batch['label'].cuda()
             pred = model(video)
             total_top_1 += (torch.eq(pred.argmax(dim=-1), label)).sum().item()
             total_top_5 += (torch.any(torch.eq(pred.topk(k=5, dim=-1)[1], label))).sum().item()
+            total_num += video[0].size(0)
         print('Val Epoch: [{}/{}] | Top-1:{:.2f}% | Top-5:{:.2f}%'
               .format(epoch, epochs, total_top_1 * 100 / total_num, total_top_5 * 100 / total_num))
     return total_top_1 / total_num, total_top_5 / total_num
@@ -71,21 +73,16 @@ if __name__ == '__main__':
     data_root, batch_size, epochs, save_root = args.data_root, args.batch_size, args.epochs, args.save_root
 
     # data prepare
-    train_transform = create_video_transform(mode='train', video_key='video', num_samples=8,
-                                             convert_to_float=False, video_mean=(114.75, 114.75, 114.75),
-                                             video_std=(57.375, 57.375, 57.375))
-    test_transform = create_video_transform(mode='val', video_key='video', num_samples=8,
-                                            convert_to_float=False, video_mean=(114.75, 114.75, 114.75),
-                                            video_std=(57.375, 57.375, 57.375))
-    train_data = labeled_video_dataset('{}/train'.format(data_root), RandomClipSampler(clip_duration=2),
+    train_data = labeled_video_dataset('{}/train'.format(data_root), RandomClipSampler(clip_duration=clip_duration),
                                        transform=train_transform, decode_audio=False)
-    test_data = labeled_video_dataset('{}/test'.format(data_root), UniformClipSampler(clip_duration=2),
+    test_data = labeled_video_dataset('{}/test'.format(data_root), UniformClipSampler(clip_duration=clip_duration),
                                       transform=test_transform, decode_audio=False)
     train_loader = DataLoader(train_data, batch_size=batch_size, num_workers=8)
     test_loader = DataLoader(test_data, batch_size=batch_size, num_workers=8)
 
     # model define, loss setup and optimizer config
-    slow_fast = create_slowfast(model_num_class=5).cuda()
+    slow_fast = create_slowfast(model_num_class=num_classes).cuda()
+    # slow_fast = torch.hub.load('facebookresearch/pytorchvideo', model='slowfast_r50', pretrained=True)
     loss_criterion = CrossEntropyLoss()
     optimizer = Adam(slow_fast.parameters(), lr=1e-1)
 
