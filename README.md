@@ -1,6 +1,6 @@
-# MSTP
+# SlowFast
 
-A PyTorch implementation of MSTP based on CVPR 2022 paper
+A PyTorch implementation of SlowFast based on CVPR 2022 paper
 [Map Sketch to Photo for Zero-Shot Sketch-Based Image Retrieval]().
 
 ![Network Architecture](result/structure.png)

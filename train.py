@@ -3,12 +3,16 @@ import os
 import random
 
 import numpy as np
+import pandas as pd
 import torch
+from pytorchvideo.data import RandomClipSampler, UniformClipSampler, labeled_video_dataset
+from pytorchvideo.models import create_slowfast
+from pytorchvideo.transforms import create_video_transform
 from torch.backends import cudnn
-from torch.utils.data.dataloader import DataLoader
+from torch.nn import CrossEntropyLoss
+from torch.optim import Adam
+from torch.utils.data import DataLoader
 from tqdm import tqdm
-
-from utils import VideoDataset
 
 # for reproducibility
 random.seed(1)
@@ -19,59 +23,24 @@ cudnn.benchmark = False
 
 
 # train for one epoch
-def train(backbone, data_loader, train_optimizer):
-    backbone.train()
-    generator.train()
-    discriminator.train()
-    total_extractor_loss, total_generator_loss, total_discriminator_loss = 0.0, 0.0, 0.0
-    total_num, train_bar = 0, tqdm(data_loader, dynamic_ncols=True)
-    for sketch, photo, label in train_bar:
-        sketch, photo, label = sketch.cuda(), photo.cuda(), label.cuda()
-
-        # generator #
-        optimizer_generator.zero_grad()
-        fake = generator(sketch)
-        pred_fake = discriminator(fake)
-
-        # generator loss
-        target_fake = torch.ones(pred_fake.size(), device=pred_fake.device)
-        generators_loss = adversarial_criterion(pred_fake, target_fake)
-        total_generator_loss += generators_loss.item() * sketch.size(0)
-
-        # extractor #
+def train(model, data_loader, train_optimizer):
+    model.train()
+    total_loss, total_acc, total_num, train_bar = 0.0, 0, 0, tqdm(data_loader, dynamic_ncols=True)
+    for batch in train_bar:
+        video, label = batch['video'].cuda(), batch['label'].cuda()
         train_optimizer.zero_grad()
-        photo_proj = backbone(photo)
-        sketch_proj = backbone(fake)
-
-        # extractor loss
-        class_loss = class_criterion(photo_proj, label) + class_criterion(sketch_proj, label)
-        total_extractor_loss += class_loss.item() * sketch.size(0)
-
-        loss = generators_loss + class_loss
+        pred = model(video)
+        loss = loss_criterion(pred, label)
+        total_loss += loss.item() * video.size(0)
+        total_acc += (torch.eq(pred.argmax(dim=-1), label)).sum()
         loss.backward()
         train_optimizer.step()
-        optimizer_generator.step()
 
-        # discriminator loss #
-        optimizer_discriminator.zero_grad()
-        pred_real = discriminator(photo)
-        target_real = torch.ones(pred_real.size(), device=pred_real.device)
-        pred_fake = discriminator(fake.detach())
-        target_fake = torch.zeros(pred_fake.size(), device=pred_fake.device)
-        adversarial_loss = adversarial_criterion(pred_real, target_real) + adversarial_criterion(pred_fake, target_fake)
-        adversarial_loss.backward()
-        optimizer_discriminator.step()
-        total_discriminator_loss += adversarial_loss.item() * photo.size(0)
+        total_num += video.size(0)
+        train_bar.set_description('Train Epoch: [{}/{}] Loss: {:.4f} Acc: {:.4f}'
+                                  .format(epoch, epochs, total_loss / total_num, total_acc / total_num))
 
-        total_num += sketch.size(0)
-
-        e_loss = total_extractor_loss / total_num
-        g_loss = total_generator_loss / total_num
-        d_loss = total_discriminator_loss / total_num
-        train_bar.set_description('Train Epoch: [{}/{}] E-Loss: {:.4f} G-Loss: {:.4f} D-Loss: {:.4f}'
-                                  .format(epoch, epochs, e_loss, g_loss, d_loss))
-
-    return e_loss, g_loss, d_loss
+    return total_loss / total_num
 
 
 # val for one epoch
@@ -120,64 +89,50 @@ def val(backbone, encoder, data_loader):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train Model')
     # common args
-    parser.add_argument('--data_root', default='/home/rh/Downloads', type=str, help='Datasets root path')
-    parser.add_argument('--data_name', default='kinetics400', type=str, choices=['kinetics400', 'something_v2'],
-                        help='Dataset name')
-    parser.add_argument('--backbone_type', default='resnet50', type=str, choices=['resnet50', 'vgg16'],
-                        help='Backbone type')
-    parser.add_argument('--emb_dim', default=512, type=int, help='Embedding dim')
-    parser.add_argument('--batch_size', default=64, type=int, help='Number of images in each mini-batch')
+    parser.add_argument('--data_root', default='data', type=str, help='Datasets root path')
+    parser.add_argument('--batch_size', default=8, type=int, help='Number of videos in each mini-batch')
     parser.add_argument('--epochs', default=10, type=int, help='Number of epochs over the model to train')
-    parser.add_argument('--warmup', default=1, type=int, help='Number of warmups over the extractor to train')
     parser.add_argument('--save_root', default='result', type=str, help='Result saved root path')
 
     # args parse
     args = parser.parse_args()
-    data_root, data_name, backbone_type, emb_dim = args.data_root, args.data_name, args.backbone_type, args.emb_dim
-    batch_size, epochs, warmup, save_root = args.batch_size, args.epochs, args.warmup, args.save_root
+    data_root, batch_size, epochs, save_root = args.data_root, args.batch_size, args.epochs, args.save_root
 
     # data prepare
-    train_data = VideoDataset(data_root, data_name, split='train')
-    val_data = VideoDataset(data_root, data_name, split='val')
-    test_data = VideoDataset(data_root, data_name, split='test')
-    train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=8)
-    val_loader = DataLoader(val_data, batch_size=batch_size, shuffle=False, num_workers=8)
-    test_loader = DataLoader(val_data, batch_size=batch_size, shuffle=False, num_workers=8)
+    train_transform = create_video_transform(mode='train', video_key='video', num_samples=8,
+                                             convert_to_float=False, video_mean=(114.75, 114.75, 114.75),
+                                             video_std=(57.375, 57.375, 57.375))
+    test_transform = create_video_transform(mode='val', video_key='video', num_samples=8,
+                                            convert_to_float=False, video_mean=(114.75, 114.75, 114.75),
+                                            video_std=(57.375, 57.375, 57.375))
+    train_data = labeled_video_dataset('{}/train'.format(data_root), RandomClipSampler(clip_duration=2),
+                                       transform=train_transform, decode_audio=False)
+    test_data = labeled_video_dataset('{}/test'.format(data_root), UniformClipSampler(clip_duration=2),
+                                      transform=test_transform, decode_audio=False)
+    train_loader = DataLoader(train_data, batch_size=batch_size, num_workers=8)
+    test_loader = DataLoader(test_data, batch_size=batch_size, num_workers=8)
 
-    # # model define
-    # extractor = Extractor(backbone_type, emb_dim).cuda()
-    # generator = Generator(in_channels=8).cuda()
-    # discriminator = Discriminator(in_channels=8).cuda()
-    #
-    # # loss setup
-    # class_criterion = NormalizedSoftmaxLoss(len(train_data.classes), emb_dim).cuda()
-    # adversarial_criterion = nn.MSELoss()
-    # # optimizer config
-    # optimizer_extractor = Adam([{'params': extractor.parameters()}, {'params': class_criterion.parameters(),
-    #                                                                  'lr': 1e-1}], lr=1e-5)
-    # optimizer_generator = Adam(generator.parameters(), lr=2e-4, betas=(0.5, 0.999))
-    # optimizer_discriminator = Adam(discriminator.parameters(), lr=2e-4, betas=(0.5, 0.999))
+    # model define, loss setup and optimizer config
+    slow_fast = create_slowfast(model_num_class=5).cuda()
+    loss_criterion = CrossEntropyLoss()
+    optimizer = Adam(slow_fast.parameters(), lr=1e-1)
 
     # training loop
     results = {'loss': [], 'acc': [], 'top-1': [], 'top-5': []}
-    save_name_pre = '{}_{}_{}'.format(data_name, backbone_type, emb_dim)
     if not os.path.exists(save_root):
         os.makedirs(save_root)
     best_acc = 0.0
     for epoch in range(1, epochs + 1):
-        for video, label in tqdm(train_loader, dynamic_ncols=True):
-            print(video.size())
-            print(label.size())
-        # train_loss = train(extractor, train_loader, optimizer_extractor)
-        # results['extractor_loss'].append(train_loss)
-        # results['generator_loss'].append(generator_loss)
-        # results['discriminator_loss'].append(discriminator_loss)
-        # precise, features = val(extractor, generator, val_loader)
-        # results['precise'].append(precise * 100)
-        # # save statistics
-        # data_frame = pd.DataFrame(data=results, index=range(1, epoch + 1))
-        # data_frame.to_csv('{}/{}_results.csv'.format(save_root, save_name_pre), index_label='epoch')
-        #
-        # if precise > best_acc:
-        #     best_acc = precise
-        #     torch.save(extractor.state_dict(), '{}/{}_extractor.pth'.format(save_root, save_name_pre))
+        train_loss, train_acc = train(slow_fast, train_loader, optimizer)
+        results['loss'].append(train_loss)
+        results['acc'].append(train_acc * 100)
+        top_1, top_5 = val(slow_fast, test_loader)
+        results['top-1'].append(top_1 * 100)
+        results['top-5'].append(top_5 * 100)
+        # save statistics
+        data_frame = pd.DataFrame(data=results, index=range(1, epoch + 1))
+        data_frame.to_csv('{}/metrics.csv'.format(save_root), index_label='epoch')
+
+        if top_1 > best_acc:
+            best_acc = top_1
+            torch.save(slow_fast.state_dict(), '{}/slow_fast.pth'.format(save_root))
