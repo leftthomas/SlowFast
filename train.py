@@ -32,58 +32,30 @@ def train(model, data_loader, train_optimizer):
         pred = model(video)
         loss = loss_criterion(pred, label)
         total_loss += loss.item() * video.size(0)
-        total_acc += (torch.eq(pred.argmax(dim=-1), label)).sum()
+        total_acc += (torch.eq(pred.argmax(dim=-1), label)).sum().item()
         loss.backward()
         train_optimizer.step()
 
         total_num += video.size(0)
-        train_bar.set_description('Train Epoch: [{}/{}] Loss: {:.4f} Acc: {:.4f}'
-                                  .format(epoch, epochs, total_loss / total_num, total_acc / total_num))
+        train_bar.set_description('Train Epoch: [{}/{}] Loss: {:.4f} Acc: {:.2f}%'
+                                  .format(epoch, epochs, total_loss / total_num, total_acc * 100 / total_num))
 
-    return total_loss / total_num
+    return total_loss / total_num, total_acc / total_num
 
 
 # val for one epoch
-def val(backbone, encoder, data_loader):
-    backbone.eval()
-    encoder.eval()
-    vectors, domains, labels = [], [], []
+def val(model, data_loader):
+    model.eval()
     with torch.no_grad():
-        for img, domain, label in tqdm(data_loader, desc='Feature extracting', dynamic_ncols=True):
-            img = img.cuda()
-            photo = img[domain == 0]
-            sketch = img[domain == 1]
-            if photo.size(0) != 0:
-                photo_emb = backbone(photo)
-            if sketch.size(0) != 0:
-                sketch_emb = backbone(encoder(sketch))
-            if photo.size(0) == 0:
-                emb = sketch_emb
-            if sketch.size(0) == 0:
-                emb = photo_emb
-            if photo.size(0) != 0 and sketch.size(0) != 0:
-                emb = torch.cat((photo_emb, sketch_emb), dim=0)
-            vectors.append(emb.cpu())
-            photo_label = label[domain == 0]
-            sketch_label = label[domain == 1]
-            label = torch.cat((photo_label, sketch_label), dim=0)
-            labels.append(label)
-            photo_domain = domain[domain == 0]
-            sketch_domain = domain[domain == 1]
-            domain = torch.cat((photo_domain, sketch_domain), dim=0)
-            domains.append(domain)
-        vectors = torch.cat(vectors, dim=0)
-        domains = torch.cat(domains, dim=0)
-        labels = torch.cat(labels, dim=0)
-        acc = compute_metric(vectors, domains, labels)
-        results['P@100'].append(acc['P@100'] * 100)
-        results['P@200'].append(acc['P@200'] * 100)
-        results['mAP@200'].append(acc['mAP@200'] * 100)
-        results['mAP@all'].append(acc['mAP@all'] * 100)
-        print('Val Epoch: [{}/{}] | P@100:{:.1f}% | P@200:{:.1f}% | mAP@200:{:.1f}% | mAP@all:{:.1f}%'
-              .format(epoch, epochs, acc['P@100'] * 100, acc['P@200'] * 100, acc['mAP@200'] * 100,
-                      acc['mAP@all'] * 100))
-    return acc['precise'], vectors
+        total_top_1, total_top_5, total_num = 0, 0, 0
+        for batch in tqdm(data_loader, dynamic_ncols=True):
+            video, label = batch['video'].cuda(), batch['label'].cuda()
+            pred = model(video)
+            total_top_1 += (torch.eq(pred.argmax(dim=-1), label)).sum().item()
+            total_top_5 += (torch.any(torch.eq(pred.topk(k=5, dim=-1)[1], label))).sum().item()
+        print('Val Epoch: [{}/{}] | Top-1:{:.2f}% | Top-5:{:.2f}%'
+              .format(epoch, epochs, total_top_1 * 100 / total_num, total_top_5 * 100 / total_num))
+    return total_top_1 / total_num, total_top_5 / total_num
 
 
 if __name__ == '__main__':
