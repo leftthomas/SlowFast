@@ -28,8 +28,8 @@ class PackPathway(nn.Module):
     def forward(self, frames):
         fast_pathway = frames
         # perform temporal sampling from the fast pathway.
-        slow_pathway = torch.index_select(frames, 1, torch.linspace(0, frames.shape[1] - 1,
-                                                                    frames.shape[1] // self.alpha).long(), )
+        slow_pathway = torch.index_select(frames, 1,
+                                          torch.linspace(0, frames.shape[1] - 1, frames.shape[1] // self.alpha).long())
         frame_list = [slow_pathway, fast_pathway]
         return frame_list
 

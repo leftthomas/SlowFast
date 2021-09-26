@@ -26,13 +26,13 @@ if __name__ == '__main__':
     for k, v in kinetics_classnames.items():
         kinetics_id_to_classname[v] = str(k).replace('"', "")
 
-    video = EncodedVideo.from_path(video_path)
+    video = EncodedVideo.from_path(video_path, decode_audio=False)
     video_data = video.get_clip(start_sec=0, end_sec=clip_duration)
     video_data = test_transform(video_data)
-    inputs = [i.cuda() for i in video_data['video']]
+    inputs = [i.cuda()[None, ...] for i in video_data['video']]
     pred = slow_fast(inputs)
 
     # get the predicted classes
-    pred_classes = pred.topk(k=5)[1]
-    pred_class_names = [kinetics_id_to_classname[int(i)] for i in pred_classes]
+    pred_classes = pred.topk(k=5).indices
+    pred_class_names = [kinetics_id_to_classname[int(i)] for i in pred_classes[0]]
     print('predicted labels: {}'.format(pred_class_names))

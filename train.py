@@ -56,7 +56,8 @@ def val(model, data_loader):
             video, label = [i.cuda() for i in batch['video']], batch['label'].cuda()
             pred = model(video)
             total_top_1 += (torch.eq(pred.argmax(dim=-1), label)).sum().item()
-            total_top_5 += torch.any(torch.eq(pred.topk(k=5, dim=-1)[1], label.unsqueeze(dim=-1)), dim=-1).sum().item()
+            total_top_5 += torch.any(torch.eq(pred.topk(k=5, dim=-1).indices, label.unsqueeze(dim=-1)),
+                                     dim=-1).sum().item()
             total_num += video[0].size(0)
             test_bar.set_description('Test Epoch: [{}/{}] | Top-1:{:.2f}% | Top-5:{:.2f}%'
                                      .format(epoch, epochs, total_top_1 * 100 / total_num,
