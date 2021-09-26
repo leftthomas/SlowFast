@@ -1,4 +1,5 @@
 import argparse
+import math
 import os
 import random
 
@@ -27,7 +28,7 @@ cudnn.benchmark = False
 def train(model, data_loader, train_optimizer):
     model.train()
     total_loss, total_acc, total_num = 0.0, 0, 0
-    train_bar = tqdm(data_loader, total=len(data_loader.dataset) // batch_size, dynamic_ncols=True)
+    train_bar = tqdm(data_loader, total=math.ceil(train_data.num_videos / batch_size), dynamic_ncols=True)
     for batch in train_bar:
         video, label = [i.cuda() for i in batch['video']], batch['label'].cuda()
         train_optimizer.zero_grad()
@@ -50,7 +51,7 @@ def val(model, data_loader):
     model.eval()
     with torch.no_grad():
         total_top_1, total_top_5, total_num = 0, 0, 0
-        test_bar = tqdm(data_loader, total=len(data_loader.dataset) // batch_size, dynamic_ncols=True)
+        test_bar = tqdm(data_loader, total=math.ceil(test_data.num_videos / batch_size), dynamic_ncols=True)
         for batch in test_bar:
             video, label = [i.cuda() for i in batch['video']], batch['label'].cuda()
             pred = model(video)
@@ -78,7 +79,8 @@ if __name__ == '__main__':
     # data prepare
     train_data = labeled_video_dataset('{}/train'.format(data_root), make_clip_sampler('random', clip_duration),
                                        transform=train_transform, decode_audio=False)
-    test_data = labeled_video_dataset('{}/test'.format(data_root), make_clip_sampler('uniform', clip_duration),
+    test_data = labeled_video_dataset('{}/test'.format(data_root),
+                                      make_clip_sampler('constant_clips_per_video', clip_duration, 1),
                                       transform=test_transform, decode_audio=False)
     train_loader = DataLoader(train_data, batch_size=batch_size, num_workers=8)
     test_loader = DataLoader(test_data, batch_size=batch_size, num_workers=8)
