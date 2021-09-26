@@ -5,7 +5,7 @@ import random
 import numpy as np
 import pandas as pd
 import torch
-from pytorchvideo.data import RandomClipSampler, UniformClipSampler, labeled_video_dataset
+from pytorchvideo.data import make_clip_sampler, labeled_video_dataset
 from pytorchvideo.models import create_slowfast
 from torch.backends import cudnn
 from torch.nn import CrossEntropyLoss
@@ -73,9 +73,9 @@ if __name__ == '__main__':
     data_root, batch_size, epochs, save_root = args.data_root, args.batch_size, args.epochs, args.save_root
 
     # data prepare
-    train_data = labeled_video_dataset('{}/train'.format(data_root), RandomClipSampler(clip_duration=clip_duration),
+    train_data = labeled_video_dataset('{}/train'.format(data_root), make_clip_sampler('random', clip_duration),
                                        transform=train_transform, decode_audio=False)
-    test_data = labeled_video_dataset('{}/test'.format(data_root), UniformClipSampler(clip_duration=clip_duration),
+    test_data = labeled_video_dataset('{}/test'.format(data_root), make_clip_sampler('uniform', clip_duration),
                                       transform=test_transform, decode_audio=False)
     train_loader = DataLoader(train_data, batch_size=batch_size, num_workers=8)
     test_loader = DataLoader(test_data, batch_size=batch_size, num_workers=8)
