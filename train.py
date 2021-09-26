@@ -26,7 +26,8 @@ cudnn.benchmark = False
 # train for one epoch
 def train(model, data_loader, train_optimizer):
     model.train()
-    total_loss, total_acc, total_num, train_bar = 0.0, 0, 0, tqdm(data_loader, dynamic_ncols=True)
+    total_loss, total_acc, total_num = 0.0, 0, 0
+    train_bar = tqdm(data_loader, total=len(data_loader.dataset) // batch_size, dynamic_ncols=True)
     for batch in train_bar:
         video, label = [i.cuda() for i in batch['video']], batch['label'].cuda()
         train_optimizer.zero_grad()
@@ -44,19 +45,21 @@ def train(model, data_loader, train_optimizer):
     return total_loss / total_num, total_acc / total_num
 
 
-# val for one epoch
+# test for one epoch
 def val(model, data_loader):
     model.eval()
     with torch.no_grad():
         total_top_1, total_top_5, total_num = 0, 0, 0
-        for batch in tqdm(data_loader, dynamic_ncols=True):
+        test_bar = tqdm(data_loader, total=len(data_loader.dataset) // batch_size, dynamic_ncols=True)
+        for batch in test_bar:
             video, label = [i.cuda() for i in batch['video']], batch['label'].cuda()
             pred = model(video)
             total_top_1 += (torch.eq(pred.argmax(dim=-1), label)).sum().item()
             total_top_5 += torch.any(torch.eq(pred.topk(k=5, dim=-1)[1], label.unsqueeze(dim=-1)), dim=-1).sum().item()
             total_num += video[0].size(0)
-        print('Val Epoch: [{}/{}] | Top-1:{:.2f}% | Top-5:{:.2f}%'
-              .format(epoch, epochs, total_top_1 * 100 / total_num, total_top_5 * 100 / total_num))
+            test_bar.set_description('Test Epoch: [{}/{}] | Top-1:{:.2f}% | Top-5:{:.2f}%'
+                                     .format(epoch, epochs, total_top_1 * 100 / total_num,
+                                             total_top_5 * 100 / total_num))
     return total_top_1 / total_num, total_top_5 / total_num
 
 
