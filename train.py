@@ -53,7 +53,7 @@ def val(model, data_loader):
             video, label = [i.cuda() for i in batch['video']], batch['label'].cuda()
             pred = model(video)
             total_top_1 += (torch.eq(pred.argmax(dim=-1), label)).sum().item()
-            total_top_5 += (torch.any(torch.eq(pred.topk(k=5, dim=-1)[1], label))).sum().item()
+            total_top_5 += torch.any(torch.eq(pred.topk(k=5, dim=-1)[1], label.unsqueeze(dim=-1)), dim=-1).sum().item()
             total_num += video[0].size(0)
         print('Val Epoch: [{}/{}] | Top-1:{:.2f}% | Top-5:{:.2f}%'
               .format(epoch, epochs, total_top_1 * 100 / total_num, total_top_5 * 100 / total_num))
@@ -82,7 +82,7 @@ if __name__ == '__main__':
 
     # model define, loss setup and optimizer config
     slow_fast = create_slowfast(model_num_class=num_classes).cuda()
-    # slow_fast = torch.hub.load('facebookresearch/pytorchvideo', model='slowfast_r50', pretrained=True)
+    # slow_fast = torch.hub.load('facebookresearch/pytorchvideo:main', model='slowfast_r50', pretrained=True)
     loss_criterion = CrossEntropyLoss()
     optimizer = Adam(slow_fast.parameters(), lr=1e-1)
 
